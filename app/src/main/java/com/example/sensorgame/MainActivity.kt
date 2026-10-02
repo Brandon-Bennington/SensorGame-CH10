@@ -49,6 +49,13 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+// CLASS 2
+import androidx.compose.foundation.Image
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.res.painterResource
+import kotlin.math.sqrt
+import kotlin.random.Random
 
 // Fixed on-screen size of the ball. NEVER CHANGES
 private const val BALL_SIZE_DP = 60
@@ -94,14 +101,70 @@ fun SensorGameScreen() {
     var gyroY by remember { mutableFloatStateOf(0f) }
     val baseSpeed = 5f
 
+    // Accelerometer
+    val accelerometer = remember { sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) }
+    val lastShakeTime by remember { mutableStateOf(0L) }
+    val shakeThreshold = 12f // m/s^2 above gravity to count as a shake
+    val shakeCooldownMs = 1500L // minimum ms between shake events
+
+    // Ball color cycling
+    var colorIndex by remember { mutableIntStateOf(0) }
+    val ballColors = remember {
+        listOf(Color.Blue, Color.Red, Color.Green, Color.Magenta, Color.Yellow)
+    }
+
+    // Stars - a list of positions, not a list of View objects
+    val starPx = with(density) { 32.dp.toPx() }
+    val starCount = 5
+    val stars = remember { mutableStateListOf<Offset>() }
+
     // One frame of game logic, called 30 times/sec by the LaunchedEffect loop below.
     // ASSIGNMENT 1 -- Implement this! See Hour 3 for the full spec
     fun moveBallWithGyro() {
         if (!hasGyroscope) return
+        // gyroY controls left/right: tilting right makes gyroY positive, so the ball moves right
+        ballX = (ballX + gyroY * baseSpeed).coerceIn(0f, areaWidthPx - ballPx)
+
+        // gyroX controls up/down: tilting the top toward you makes gyroX positive, so the ball moves down
+        ballY = (ballY + gyroX * baseSpeed).coerceIn(0f, areaHeightPx - ballPx)
         // Steps to complete:
         // 1. Update ballX based on the horizontal gyroscope reading and baseSpeed
         // 2. Update ballY based on the vertical gyroscope reading and baseSpeed
         // 3. Keep the ball on screen — see Hour 1, Topic 5 for the technique
+    }
+
+    fun onShakeDetected() {
+        // Steps to complete:
+        // 1. Move to the next colour in the list, wrapping back to the start after the last one
+        // 2. Give the player some feedback that a shake was detected
+    }
+
+    fun spawnStars() {
+        stars.clear()
+        val bottomMarginPx = with(density) { 120.dp.toPx() }
+        val safeHeight = (areaHeightPx - bottomMarginPx).coerceAtLeast(starPx * 2)
+        repeat(starCount) {
+            val x = Random.nextFloat() * (areaWidthPx - starPx)
+            val y = Random.nextFloat() * (areaHeightPx - starPx)
+            stars.add(Offset(x, y))
+        }
+    }
+
+    fun checkStarCollisions() {
+        val ballRight = ballX + ballPx
+        val ballBottom = ballY + ballPx
+        val collected = mutableListOf<Offset>()
+        for (star in stars) {
+            if (ballX < star.x + starPx && ballRight > star.x &&
+                ballY < star.y + starPx && ballBottom > star.y) {
+                collected.add(star)
+            }
+        }
+        for (star in collected) {
+            stars.remove(star)
+            score += 10
+        }
+        if (stars.isEmpty()) spawnStars()
     }
 
     // Registers the gyroscope listener while the screen is visible, unregisters when it
@@ -114,6 +177,33 @@ fun SensorGameScreen() {
                 // Steps to complete:
                 // 1. Check which sensor this event came from
                 // 2. If it's the gyroscope, store its readings so moveBallWithGyro() can use them
+                when (event.sensor.type) {
+                    Sensor.TYPE_GYROSCOPE -> {
+                        // values[0] = X axis (pitch): tilt forward/back, controls vertical movement
+                        gyroX = event.values[0]
+
+                        // values[1] = Y axis (roll): tilt left/right, controls horizontal movement
+                        gyroY = event.values[1]
+                    }
+
+                    Sensor.TYPE_ACCELEROMETER -> {
+                        // 1.
+                        val ax = event.values[0]
+                        val ay = event.values[1]
+                        val az = event.values[2]
+                        // 2.
+
+                        val now = System.currentTimeMillis()
+
+                        // 3.
+
+
+                        // Steps to complete:
+                        // 1. Read the three acceleration axes from this event
+                        // 2. Work out how much force is being applied beyond gravity
+                        // 3. If that force is large enough, and the cooldown has passed, react to the shake
+                    }
+                }
             }
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) { }
         }
@@ -142,6 +232,7 @@ fun SensorGameScreen() {
         while (isActive) {
             delay(33L)
             moveBallWithGyro()
+            checkStarCollisions()
         }
     }
 
@@ -154,6 +245,7 @@ fun SensorGameScreen() {
                     areaHeightPx = coords.size.height.toFloat()
                     ballX = (areaWidthPx - ballPx) / 2f
                     ballY = (areaHeightPx - ballPx) / 2f
+                    spawnStars()
                 }
             }
             .pointerInput(Unit) {
@@ -183,8 +275,18 @@ fun SensorGameScreen() {
             modifier = Modifier
                 .offset { IntOffset(ballX.roundToInt(), ballY.roundToInt()) }
                 .size(BALL_SIZE_DP.dp)
-                .background(Color.Blue, CircleShape)
+                .background(ballColors[colorIndex], CircleShape)
         )
+        // STAR
+        stars.forEach { starPos ->
+            Image(
+                painter = painterResource(R.drawable.star_shape),
+                contentDescription = null,
+                modifier = Modifier
+                    .offset{ IntOffset(starPos.x.roundToInt(), starPos.y.roundToInt()) }
+                    .size(32.dp)
+            )
+        }
 
         // Shake + GPS buttons - bottom of screen. Disabled until wired up in next class
         Row(
@@ -193,7 +295,7 @@ fun SensorGameScreen() {
                 .padding(24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Button(onClick = {}, enabled = false) {
+            Button(onClick = { onShakeDetected() }, enabled = true) {
                 Text("Shake")
             }
             Button(onClick = {}, enabled = false) {
