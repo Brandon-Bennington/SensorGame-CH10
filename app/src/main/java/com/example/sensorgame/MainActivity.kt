@@ -56,6 +56,24 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.res.painterResource
 import kotlin.math.sqrt
 import kotlin.random.Random
+// CLASS 3
+import android.Manifest
+import android.content.pm.PackageManager
+import android.location.Location
+import android.os.Looper
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import kotlinx.coroutines.launch
+// Class 4
+import androidx.compose.material3.AlertDialog
+import androidx.navigationevent.NavigationEventDispatcher
 
 // Fixed on-screen size of the ball. NEVER CHANGES
 private const val BALL_SIZE_DP = 60
@@ -118,10 +136,22 @@ fun SensorGameScreen() {
     val starCount = 5
     val stars = remember { mutableStateListOf<Offset>() }
 
+    // FusedLocationProviderClient - googles recommended location API
+    val fusedLocation = remember { LocationServices.getFusedLocationProviderClient(context) }
+    var lastLocation by remember { mutableStateOf<Location?>(null) }
+    val rewardDistanceM = 10f // metres walked before reward triggers
+    val scope = rememberCoroutineScope()
+    var gpsButtonEnabled by remember { mutableStateOf(true) }
+
+    // Score, win flag, reward
+    var gameOver by remember { mutableStateOf(false) }
+    var showWinDialog by remember { mutableStateOf(false) }
+    val winScore = 50
+
     // One frame of game logic, called 30 times/sec by the LaunchedEffect loop below.
     // ASSIGNMENT 1 -- Implement this! See Hour 3 for the full spec
     fun moveBallWithGyro() {
-        if (!hasGyroscope) return
+        if (!hasGyroscope || gameOver) return
         // gyroY controls left/right: tilting right makes gyroY positive, so the ball moves right
         ballX = (ballX + gyroY * baseSpeed).coerceIn(0f, areaWidthPx - ballPx)
 
@@ -133,10 +163,16 @@ fun SensorGameScreen() {
         // 3. Keep the ball on screen — see Hour 1, Topic 5 for the technique
     }
 
+    fun addScore(points: Int) {
+        score += points
+        checkWin()
+    }
+
     fun onShakeDetected() {
         // Steps to complete:
         // 1. Move to the next colour in the list, wrapping back to the start after the last one
         // 2. Give the player some feedback that a shake was detected
+        addScore(2)
     }
 
     fun spawnStars() {
@@ -151,6 +187,7 @@ fun SensorGameScreen() {
     }
 
     fun checkStarCollisions() {
+        if (gameOver) return
         val ballRight = ballX + ballPx
         val ballBottom = ballY + ballPx
         val collected = mutableListOf<Offset>()
@@ -162,9 +199,78 @@ fun SensorGameScreen() {
         }
         for (star in collected) {
             stars.remove(star)
-            score += 10
+            addScore(10)
         }
         if (stars.isEmpty()) spawnStars()
+    }
+
+    // Called by the OS every time a new GPS fix arrives
+    fun onNewLocation(location: Location) {
+        gpsText = "Lat: ${"%.5f".format(location.latitude)}, " +
+                "Lon: ${"%.5f".format(location.longitude)}, "
+        // ASSIGNMENT 3:
+        // 1. If we've seen a location before, compare it against this new one
+        // 2. Figure out how far the player has moved since that last fix
+        // 3. If they've gone far enough, reward them and update your baseline
+        // 4. Handle the very first fix, when there's nothing to compare against yet
+        addScore(5)
+    }
+
+    // Called by the OS every time a new location fix arrives
+    val locationCallback = remember {
+        object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                result.lastLocation?.let { onNewLocation(it) }
+            }
+        }
+    }
+
+    // called when play again is tapped in the win dialog
+    fun restartGame() {
+        score = 0
+        gameOver = false
+        colorIndex = 0
+        gyroX = 0f
+        gyroY = 0f
+        ballX = (areaWidthPx - ballPx) /2f
+        ballY = (areaHeightPx - ballPx) /2f
+        spawnStars()
+    }
+
+    fun checkWin() { // guard: already won - do nothing
+        if (gameOver) return
+        // ASSIGNMENT 4
+        // 1. Check whether the score has actually reached the target yet
+        // 2. If it has, mark the game as over
+        // 3. Ask for the win dialog to be shown
+
+    }
+    fun startLocationUpdates() { // Guard: never call requestLocationUpdates without permission
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED) return
+
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2000L)
+            .setMinUpdateIntervalMillis(1000L)
+            .build()
+        try {
+            fusedLocation.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
+        } catch (e: SecurityException) {
+            gpsText = "Location unavailable"
+        }
+    }
+
+    // Created once - it's result callback runs startLocationUpdates() if the user allows it
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) startLocationUpdates() else gpsText = "Location permission denied"
+    }
+
+    //
+    LaunchedEffect(Unit) {
+        val hasPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        if (hasPermission) startLocationUpdates() else locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
     }
 
     // Registers the gyroscope listener while the screen is visible, unregisters when it
@@ -209,16 +315,26 @@ fun SensorGameScreen() {
         }
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME ->
-                    gyroscope?.let { sensorManager.registerListener(listener, it, SensorManager.SENSOR_DELAY_UI) }
-                Lifecycle.Event.ON_PAUSE ->
+                Lifecycle.Event.ON_RESUME -> {
+                    gyroscope?.let {
+                        sensorManager.registerListener(
+                            listener,
+                            it,
+                            SensorManager.SENSOR_DELAY_UI
+                        )
+                    }
+                }
+                Lifecycle.Event.ON_PAUSE -> {
                     sensorManager.unregisterListener(listener)
+                    fusedLocation.removeLocationUpdates(locationCallback)
+                }
                 else -> {}
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             sensorManager.unregisterListener(listener)
+            fusedLocation.removeLocationUpdates(locationCallback)
             lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
@@ -245,6 +361,7 @@ fun SensorGameScreen() {
                     areaHeightPx = coords.size.height.toFloat()
                     ballX = (areaWidthPx - ballPx) / 2f
                     ballY = (areaHeightPx - ballPx) / 2f
+                    score = 0; gameOver = false
                     spawnStars()
                 }
             }
@@ -298,9 +415,29 @@ fun SensorGameScreen() {
             Button(onClick = { onShakeDetected() }, enabled = true) {
                 Text("Shake")
             }
-            Button(onClick = {}, enabled = false) {
+            Button(onClick = {
+                getButtonEnabled = false     // "Before" position: fixed LA base coordinate
+                val base = Location("test").apply { latitude = 34.0522; longitude = -118.2437}
+                                             // "After" position: 0.0001 degrees north of base = 11 meters
+                val current = Location("test").apply { latitude = 34.0523; longitude = -118.2437}
+                lastLocation = base
+                onNewLocation(current)
+                scope.launch { delay(5000L); gpsButtonEnabled = true }
+            }, enabled = false) {
                 Text("GPS +10m")
             }
+        }
+        if (showWinDialog) {
+            AlertDialog(
+                onDismissRequest = { },
+                title = { Text("You Win!") },
+                text = { Text("Final Score: $score")},
+                confirmButton = {
+                    Button(onClick = { showWinDialog = false; restartGame() }) {
+                        Text("Play Again")
+                    }
+                }
+            )
         }
     }
 }
