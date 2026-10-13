@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -74,6 +75,7 @@ import kotlinx.coroutines.launch
 // Class 4
 import androidx.compose.material3.AlertDialog
 import androidx.navigationevent.NavigationEventDispatcher
+import kotlin.math.abs
 
 // Fixed on-screen size of the ball. NEVER CHANGES
 private const val BALL_SIZE_DP = 60
@@ -121,7 +123,7 @@ fun SensorGameScreen() {
 
     // Accelerometer
     val accelerometer = remember { sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) }
-    val lastShakeTime by remember { mutableStateOf(0L) }
+    var lastShakeTime by remember { mutableLongStateOf(0L) }
     val shakeThreshold = 12f // m/s^2 above gravity to count as a shake
     val shakeCooldownMs = 1500L // minimum ms between shake events
 
@@ -291,21 +293,19 @@ fun SensorGameScreen() {
                     }
 
                     Sensor.TYPE_ACCELEROMETER -> {
-                        // 1.
                         val ax = event.values[0]
                         val ay = event.values[1]
                         val az = event.values[2]
-                        // 2.
+
+                        val acceleration = sqrt((ax * ax + ay * ay + az * az).toDouble()).toFloat()
+                        val deltaAcceleration = abs(acceleration - SensorManager.GRAVITY_EARTH)
 
                         val now = System.currentTimeMillis()
 
-                        // 3.
-
-
-                        // Steps to complete:
-                        // 1. Read the three acceleration axes from this event
-                        // 2. Work out how much force is being applied beyond gravity
-                        // 3. If that force is large enough, and the cooldown has passed, react to the shake
+                        if (deltaAcceleration > shakeThreshold && (now - lastShakeTime) > shakeCooldownMs) {
+                            lastShakeTime = now
+                            onShakeDetected()
+                        }
                     }
                 }
             }
@@ -315,6 +315,13 @@ fun SensorGameScreen() {
             when (event) {
                 Lifecycle.Event.ON_RESUME -> {
                     gyroscope?.let {
+                        sensorManager.registerListener(
+                            listener,
+                            it,
+                            SensorManager.SENSOR_DELAY_UI
+                        )
+                    }
+                    accelerometer?.let {
                         sensorManager.registerListener(
                             listener,
                             it,
