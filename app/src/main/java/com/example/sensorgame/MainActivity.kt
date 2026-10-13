@@ -163,15 +163,21 @@ fun SensorGameScreen() {
         // 3. Keep the ball on screen — see Hour 1, Topic 5 for the technique
     }
 
+    fun checkWin() {
+        if (gameOver) return
+        if (score >= winScore) {
+            gameOver = true
+            showWinDialog = true
+        }
+    }
+
     fun addScore(points: Int) {
         score += points
         checkWin()
     }
 
     fun onShakeDetected() {
-        // Steps to complete:
-        // 1. Move to the next colour in the list, wrapping back to the start after the last one
-        // 2. Give the player some feedback that a shake was detected
+        colorIndex = (colorIndex + 1) % ballColors.size
         addScore(2)
     }
 
@@ -237,14 +243,6 @@ fun SensorGameScreen() {
         spawnStars()
     }
 
-    fun checkWin() { // guard: already won - do nothing
-        if (gameOver) return
-        // ASSIGNMENT 4
-        // 1. Check whether the score has actually reached the target yet
-        // 2. If it has, mark the game as over
-        // 3. Ask for the win dialog to be shown
-
-    }
     fun startLocationUpdates() { // Guard: never call requestLocationUpdates without permission
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED) return
@@ -416,7 +414,7 @@ fun SensorGameScreen() {
                 Text("Shake")
             }
             Button(onClick = {
-                getButtonEnabled = false     // "Before" position: fixed LA base coordinate
+                gpsButtonEnabled = false     // "Before" position: fixed LA base coordinate
                 val base = Location("test").apply { latitude = 34.0522; longitude = -118.2437}
                                              // "After" position: 0.0001 degrees north of base = 11 meters
                 val current = Location("test").apply { latitude = 34.0523; longitude = -118.2437}
