@@ -216,12 +216,17 @@ fun SensorGameScreen() {
     fun onNewLocation(location: Location) {
         gpsText = "Lat: ${"%.5f".format(location.latitude)}, " +
                 "Lon: ${"%.5f".format(location.longitude)}, "
-        // ASSIGNMENT 3:
-        // 1. If we've seen a location before, compare it against this new one
-        // 2. Figure out how far the player has moved since that last fix
-        // 3. If they've gone far enough, reward them and update your baseline
-        // 4. Handle the very first fix, when there's nothing to compare against yet
-        addScore(5)
+        
+        if (lastLocation == null) {
+            lastLocation = location
+        } else {
+            val distance = lastLocation!!.distanceTo(location)
+            if (distance >= rewardDistanceM) {
+                addScore(5)
+                Toast.makeText(context, "You've moved ${distance.toInt()}m!", Toast.LENGTH_SHORT).show()
+                lastLocation = location
+            }
+        }
     }
 
     // Called by the OS every time a new location fix arrives
@@ -428,7 +433,7 @@ fun SensorGameScreen() {
                 lastLocation = base
                 onNewLocation(current)
                 scope.launch { delay(5000L); gpsButtonEnabled = true }
-            }, enabled = false) {
+            }, enabled = gpsButtonEnabled) {
                 Text("GPS +10m")
             }
         }
